@@ -1,12 +1,11 @@
-# CLAUDE.md
+# LLM.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Ornith 1.0 when working with code in this repository.
 
 ## Project Overview
 
 Spartan is an AI-powered autonomous penetration testing agent. It uses an agentic pipeline to solve CTF challenges, Hack The Box machines, and authorized security assessments. Output is raw streaming to stdout.
 
-**Published at USENIX Security 2024**: [Paper](https://www.usenix.org/conference/usenixsecurity24/presentation/deng)
 
 **Stack:** Python 3.12+, uv, Agent SDK
 
@@ -82,7 +81,7 @@ uv run pytest tests/test_controller.py::test_name # Single test
 
 ### Modernized Legacy (`spartan_legacy/`)
 
-The classic USENIX-2024 human-in-the-loop tool, rebuilt on a native multi-provider LLM
+The classic human-in-the-loop tool, rebuilt on a native multi-provider LLM
 layer. CLI: `spartan-legacy` (`--list-models`, `--smoke-test`, `--reasoning-model`,
 `--parsing-model`, `--base-url`).
 
