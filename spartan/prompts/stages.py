@@ -16,6 +16,21 @@ _IDENTITY = (
     "You are Spartan, an AI-powered CTF challenge solver and penetration testing assistant."
 )
 
+# Strict gate injected into any Stage 1 that must guarantee comprehensive scans
+# before the LLM is permitted to call complete_stage.
+_MANDATORY_RECON_GATE = """
+COMPREHENSIVE SCAN REQUIREMENT — STRICTLY ENFORCED:
+You are STRICTLY FORBIDDEN from calling the `complete_stage` tool until ALL of the
+following scan types have been executed and their outputs reviewed:
+
+  1. All-ports TCP scan:          nmap -p- (or equivalent covering all 65535 ports)
+  2. Top-1000 UDP scan:           nmap -sU --top-ports 1000 (or equivalent)
+  3. Deep service enumeration:    nmap -sV -sC on ALL discovered open TCP+UDP ports
+
+If you attempt to call `complete_stage` before completing the above, your call will
+be REJECTED and you will receive an error. Do not skip, abbreviate, or batch these
+scans—run each one explicitly and wait for its output before proceeding."""
+
 _TOOLS = """TOOLS & CAPABILITIES:
 You MUST use the provided function-calling tools to interact with the system.
 
@@ -317,10 +332,12 @@ STAGE: COMPREHENSIVE ASSET IDENTIFICATION
 
 Your goal is to perform a thorough reconnaissance and asset inventory of the target. This is a professional penetration test, so completeness matters more than speed.
 
+{_MANDATORY_RECON_GATE}
+
 METHODOLOGY:
-1. Full TCP port scan (all 65535 ports)
-2. Top 1000 UDP port scan
-3. Service version detection and banner grabbing on all open ports
+1. Full TCP port scan (all 65535 ports) — `nmap -p- <target>`
+2. Top 1000 UDP port scan — `nmap -sU --top-ports 1000 <target>`
+3. Service version detection and banner grabbing on ALL open ports — `nmap -sV -sC -p <ports> <target>`
 4. OS fingerprinting
 5. Web application analysis (if applicable):
    - Technology stack identification
@@ -653,6 +670,92 @@ def passive_stage3_task_prompt(config: SpartanConfig, prior_results: list[StageR
     task = f"Generate a passive vulnerability assessment report for: {config.target}"
     if context:
         task += f"\n\n{context}"
-    
+
     task += "\n\nCRITICAL: Begin the report NOW following the REQUIRED REPORT STRUCTURE. Do NOT attempt to run tools or perform enumeration. The context above is final."
     return task
+
+
+# =============================================================================
+# Final Master Report Stage Prompts (shared across all pipeline modes)
+# =============================================================================
+
+
+def final_report_stage_system_prompt(config: SpartanConfig) -> str:
+    """Build system prompt for the Final Master Report consolidation stage."""
+    return f"""{_IDENTITY}
+
+STAGE: FINAL MASTER REPORT CONSOLIDATION
+
+Your sole task is to produce a single, authoritative Master Penetration Test / Challenge
+Report by merging the intermediate stage reports injected in the task prompt below.
+
+Do NOT re-run any tools or commands. Do NOT hallucinate findings not present in the
+intermediate reports. Compile, de-duplicate, and structure the existing evidence.
+
+MASTER REPORT STRUCTURE:
+
+## 1. Executive Summary
+- Overall engagement outcome (flags captured / vulnerabilities confirmed)
+- Aggregate risk rating
+- Top 5 most critical findings
+
+## 2. Scope & Methodology
+- Target: {config.target}
+- Mode: {config.mode}
+- Tools & techniques used across all stages
+
+## 3. Stage-by-Stage Narrative
+For each stage, write a concise narrative of what was done and what was found.
+
+## 4. Consolidated Findings
+| # | Severity | Title | Asset | Evidence |
+|---|----------|-------|-------|----------|
+Include every unique finding, de-duplicated.
+
+## 5. Flags Captured
+List every flag found with its capture method.
+
+## 6. Remediation Roadmap
+Prioritised remediation table (Critical first).
+
+## 7. Conclusion
+Brief closing assessment of the target's security posture.
+
+Write the report in professional Markdown. Be exhaustive — this is the permanent record
+of the entire engagement."""
+
+
+def final_report_stage_task_prompt(
+    config: SpartanConfig,
+    prior_results: list[StageResult],
+    intermediate_reports: list[str] | None = None,
+) -> str:
+    """Build task prompt for the Final Master Report stage.
+
+    Args:
+        config: Spartan configuration.
+        prior_results: StageResult objects from all prior stages (for flags/metadata).
+        intermediate_reports: Pre-read Markdown strings from on-disk stage reports.
+    """
+    context = _build_prior_context_block(prior_results)
+
+    parts: list[str] = [
+        f"Compile the Final Master Report for engagement target: {config.target}",
+        "",
+    ]
+
+    if intermediate_reports:
+        parts.append("INTERMEDIATE STAGE REPORTS (primary source of truth):")
+        for i, report_md in enumerate(intermediate_reports, start=1):
+            parts.append(f"\n--- STAGE {i} REPORT ---")
+            parts.append(report_md)
+
+    if context:
+        parts.append("\nSTAGE METADATA (flags, status, costs):")
+        parts.append(context)
+
+    parts.append(
+        "\nCRITICAL: Begin the Master Report NOW. Do NOT run any tools. Use only "
+        "the stage reports and metadata above as your source."
+    )
+    return "\n".join(parts)

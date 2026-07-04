@@ -35,6 +35,10 @@ _DEFAULT_MODEL = "ornith:1.0"
 _MAX_RETRIES_ON_BAD_JSON = 3
 _MAX_TOOL_ROUNDS = 50  # safety valve: stop after N tool-call round-trips
 
+# Signals that MUST appear in the conversation history (message content joined)
+# before a Stage 1 complete_stage call is honoured.
+_REQUIRED_RECON_SIGNALS: tuple[str, ...] = ("-p-", "-sV", "-sC")
+
 
 class MessageType(Enum):
     """Framework-agnostic message types from agent backends."""
@@ -122,11 +126,16 @@ class OrnithBackend(AgentBackend):
         system_prompt: str,
         model: str = _DEFAULT_MODEL,
         base_url: str = _DEFAULT_BASE_URL,
+        audit_log_path: str = "/workspace/raw_execution_audit.log",
+        enforce_recon_gate: bool = False,
     ):
         self._cwd = working_directory
         self._system_prompt = system_prompt
         self._model = model
         self._base_url = base_url
+        self._audit_log_path = audit_log_path
+        # When True, validate required recon scans before honouring complete_stage.
+        self._enforce_recon_gate = enforce_recon_gate
 
         # Conversation state
         self._messages: list[dict[str, Any]] = []
@@ -135,6 +144,8 @@ class OrnithBackend(AgentBackend):
         self._client: Any | None = None  # AsyncOpenAI instance
         self._dispatcher: ToolDispatcher | None = None
         self._task: asyncio.Task[None] | None = None
+        # Harvested by PipelineOrchestrator after stage completion.
+        self.stage_comprehensive_report: str = ""
 
     # ── Lifecycle ────────────────────────────────────────────────────────
 
@@ -152,7 +163,10 @@ class OrnithBackend(AgentBackend):
             api_key="not-needed",  # Ollama ignores the key
             base_url=self._base_url,
         )
-        self._dispatcher = ToolDispatcher(working_directory=self._cwd)
+        self._dispatcher = ToolDispatcher(
+            working_directory=self._cwd,
+            audit_log_path=self._audit_log_path,
+        )
 
         # Seed the conversation with the system prompt.
         self._messages = [{"role": "system", "content": self._system_prompt}]
@@ -268,6 +282,64 @@ class OrnithBackend(AgentBackend):
                 for tc in message.tool_calls:
                     tool_name = tc.function.name
                     raw_args = tc.function.arguments
+
+                    # ── complete_stage interception ───────────────────────
+                    if tool_name == "complete_stage":
+                        parsed_cs = parse_tool_arguments(raw_args)
+                        if "_parse_error" not in parsed_cs:
+                            # Validate recon gate if enabled.
+                            if self._enforce_recon_gate:
+                                missing = self._check_recon_gate()
+                                if missing:
+                                    gate_msg = (
+                                        "[SYSTEM] Cannot complete stage. "
+                                        "Required comprehensive scans have not been executed. "
+                                        f"Missing signals in history: {', '.join(missing)}. "
+                                        "You must run: (1) nmap -p- all-ports TCP scan, "
+                                        "(2) nmap -sU --top-ports 1000 UDP scan, and "
+                                        "(3) nmap -sV -sC deep service enumeration "
+                                        "before calling complete_stage."
+                                    )
+                                    logger.warning(
+                                        "complete_stage BLOCKED — missing recon signals: %s",
+                                        missing,
+                                    )
+                                    self._messages.append(
+                                        {"role": "user", "content": gate_msg}
+                                    )
+                                    await self._queue.put(
+                                        AgentMessage(
+                                            type=MessageType.TEXT,
+                                            content=gate_msg,
+                                        )
+                                    )
+                                    # Do NOT break — let the loop continue so the
+                                    # model has a chance to run the missing scans.
+                                    continue
+
+                            # Gate passed (or not enforced): harvest the report.
+                            self.stage_comprehensive_report = parsed_cs.get(
+                                "stage_comprehensive_report", ""
+                            )
+                            logger.info(
+                                "complete_stage accepted — report length=%d chars",
+                                len(self.stage_comprehensive_report),
+                            )
+                            # Signal conversation end via RESULT sentinel.
+                            await self._queue.put(
+                                AgentMessage(
+                                    type=MessageType.RESULT,
+                                    content=None,
+                                    metadata={
+                                        "session_id": self._session_id,
+                                        "cost_usd": 0,
+                                        "stage_comprehensive_report": self.stage_comprehensive_report,
+                                    },
+                                )
+                            )
+                            return
+
+                    # ── All other tool calls ──────────────────────────────
 
                     # Emit TOOL_START event
                     await self._queue.put(
@@ -433,3 +505,22 @@ class OrnithBackend(AgentBackend):
 
     async def resume(self, session_id: str) -> bool:
         return False
+
+    # ── Recon gate ───────────────────────────────────────────────────────
+
+    def _check_recon_gate(self) -> list[str]:
+        """Check whether required recon signals appear in the message history.
+
+        Scans all non-system message content for the presence of each string
+        in ``_REQUIRED_RECON_SIGNALS``.
+
+        Returns:
+            A list of missing signal strings. Empty list means gate is passed.
+        """
+        # Concatenate all message content (skip system prompt) for pattern search.
+        history_text = " ".join(
+            str(msg.get("content", ""))
+            for msg in self._messages
+            if msg.get("role") != "system"
+        )
+        return [sig for sig in _REQUIRED_RECON_SIGNALS if sig not in history_text]

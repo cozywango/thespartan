@@ -34,6 +34,9 @@ class SessionInfo:
     total_cost_usd: float = 0.0
     model: str = ""
     last_error: str | None = None
+    # Shadow logger — every execute_command result is appended here unconditionally,
+    # bypassing LLM context-window trimming for a zero-data-loss audit trail.
+    audit_log_path: str = "/workspace/raw_execution_audit.log"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize session to dictionary for JSON storage."""
@@ -50,6 +53,7 @@ class SessionInfo:
             "total_cost_usd": self.total_cost_usd,
             "model": self.model,
             "last_error": self.last_error,
+            "audit_log_path": self.audit_log_path,
         }
 
     @classmethod
@@ -70,6 +74,7 @@ class SessionInfo:
             total_cost_usd=data.get("total_cost_usd", 0.0),
             model=data.get("model", ""),
             last_error=data.get("last_error"),
+            audit_log_path=data.get("audit_log_path", "/workspace/raw_execution_audit.log"),
         )
 
 

@@ -86,6 +86,38 @@ TOOL_SCHEMA: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "complete_stage",
+            "description": (
+                "Signal that the current pipeline stage is complete. "
+                "IMPORTANT: You must write a comprehensive Markdown report of everything "
+                "achieved in this stage BEFORE calling this tool. Do NOT call this tool "
+                "until you have gathered all required evidence and run all mandatory scans."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "stage_comprehensive_report": {
+                        "type": "string",
+                        "description": (
+                            "A detailed Markdown summary of everything accomplished in this stage. "
+                            "Must include: all commands executed and their key outputs, all "
+                            "discoveries (open ports, services, vulnerabilities, credentials, flags), "
+                            "and recommended next steps. This is the permanent record for this stage "
+                            "and will be used to generate the final master report. Be exhaustive."
+                        ),
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "One-line human-readable summary of the stage outcome.",
+                    },
+                },
+                "required": ["stage_comprehensive_report"],
+            },
+        },
+    },
 ]
 
 
@@ -127,16 +159,24 @@ class ToolDispatcher:
         working_directory: CWD for all subprocess invocations.
         default_timeout: Fallback timeout if the model doesn't specify one.
         command_history: Running log of every command executed (for auditing).
+        audit_log_path: Append-only shadow log path for zero-data-loss recording.
+            Every execute_command result is written here regardless of LLM context
+            trimming. Defaults to the SessionInfo audit_log_path sentinel.
     """
 
     working_directory: str = "."
     default_timeout: int = _DEFAULT_TIMEOUT
     command_history: list[CommandResult] = field(default_factory=list)
+    audit_log_path: str = "/workspace/raw_execution_audit.log"
 
     # ── Public API ───────────────────────────────────────────────────────
 
     async def dispatch(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """Route a tool call to the appropriate handler.
+
+        For ``execute_command`` calls the result is additionally shadow-logged
+        to :attr:`audit_log_path` in an append-only fashion, guaranteeing zero
+        data loss regardless of LLM context-window trimming.
 
         Args:
             tool_name: Function name from the LLM's tool_call.
@@ -146,10 +186,19 @@ class ToolDispatcher:
             A string to be sent back as the tool-response content.
         """
         if tool_name == "execute_command":
-            return await self._handle_execute_command(arguments)
+            result_str = await self._handle_execute_command(arguments)
+            self._shadow_log(arguments.get("command", ""), result_str)
+            return result_str
         if tool_name == "write_file":
             return self._handle_write_file(arguments)
-        return f"[ERROR] Unknown tool '{tool_name}'. Available tools: execute_command, write_file."
+        if tool_name == "complete_stage":
+            # complete_stage is handled upstream in OrnithBackend / PipelineOrchestrator.
+            # If it reaches dispatch it means the orchestrator decided it was valid;
+            # return a simple ack so the tool-calling loop can close gracefully.
+            report = arguments.get("stage_comprehensive_report", "")
+            summary = arguments.get("summary", "Stage completed.")
+            return f"[OK] Stage completion acknowledged. Summary: {summary}\nReport length: {len(report)} chars."
+        return f"[ERROR] Unknown tool '{tool_name}'. Available tools: execute_command, write_file, complete_stage."
 
     # ── Handlers ─────────────────────────────────────────────────────────
 
@@ -175,6 +224,32 @@ class ToolDispatcher:
             return f"[OK] Wrote {len(content)} bytes to {full_path}"
         except Exception as exc:
             return f"[ERROR] Failed to write file '{path}': {exc}"
+
+    def _shadow_log(self, command: str, result_str: str) -> None:
+        """Append an immutable audit record to the shadow log.
+
+        Writes are intentionally *non-raising*: a failure to log must never
+        interrupt the live exploitation session.
+
+        Args:
+            command: The bash command that was executed.
+            result_str: The formatted tool-response string returned to the LLM.
+        """
+        try:
+            log_path = self.audit_log_path
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            separator = "\n" + "=" * 72 + "\n"
+            from datetime import datetime
+            entry = (
+                f"{separator}"
+                f"TIMESTAMP : {datetime.utcnow().isoformat()}Z\n"
+                f"COMMAND   : {command}\n"
+                f"OUTPUT    :\n{result_str}\n"
+            )
+            with open(log_path, "a", encoding="utf-8") as fh:
+                fh.write(entry)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Shadow log write failed (non-fatal): %s", exc)
 
     # ── Subprocess runner ────────────────────────────────────────────────
 

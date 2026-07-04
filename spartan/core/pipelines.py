@@ -3,6 +3,19 @@
 from spartan.core.pipeline import PipelineMode, StageDefinition
 from spartan.prompts import stages
 
+# ── Final reporting stage (shared across all modes) ──────────────────────────
+#
+# The task prompt builder has an optional `intermediate_reports` kwarg that
+# PipelineOrchestrator._run_stage() injects with pre-read Markdown strings
+# from prior stage reports saved to disk.
+
+_FINAL_REPORT_STAGE = StageDefinition(
+    name="final_report",
+    display_name="Final Master Report",
+    get_system_prompt=stages.final_report_stage_system_prompt,
+    get_task_prompt=stages.final_report_stage_task_prompt,  # type: ignore[arg-type]
+)
+
 CTF_STAGES: list[StageDefinition] = [
     StageDefinition(
         name="recon",
@@ -22,6 +35,7 @@ CTF_STAGES: list[StageDefinition] = [
         get_system_prompt=stages.ctf_stage3_system_prompt,
         get_task_prompt=stages.ctf_stage3_task_prompt,
     ),
+    _FINAL_REPORT_STAGE,
 ]
 
 PENTEST_STAGES: list[StageDefinition] = [
@@ -43,6 +57,7 @@ PENTEST_STAGES: list[StageDefinition] = [
         get_system_prompt=stages.pentest_stage3_system_prompt,
         get_task_prompt=stages.pentest_stage3_task_prompt,
     ),
+    _FINAL_REPORT_STAGE,
 ]
 
 PASSIVE_STAGES: list[StageDefinition] = [
@@ -64,6 +79,7 @@ PASSIVE_STAGES: list[StageDefinition] = [
         get_system_prompt=stages.passive_stage3_system_prompt,
         get_task_prompt=stages.passive_stage3_task_prompt,
     ),
+    _FINAL_REPORT_STAGE,
 ]
 
 
