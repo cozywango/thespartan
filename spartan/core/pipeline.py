@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from spartan.core.config import SpartanConfig
 from spartan.core.events import EventBus
@@ -17,6 +17,25 @@ if TYPE_CHECKING:
     from spartan.core.controller import AgentController
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class TaskPromptCallable(Protocol):
+    """Protocol for stage task-prompt builder functions.
+
+    All stage task-prompt builders must accept ``(config, prior_results)``.
+    Builders for aggregation stages (e.g. the Final Master Report) may
+    additionally accept ``intermediate_reports`` as a keyword argument;
+    all other builders safely ignore it.
+    """
+
+    def __call__(
+        self,
+        config: SpartanConfig,
+        prior_results: list[StageResult],
+        *,
+        intermediate_reports: list[str] | None = None,
+    ) -> str: ...
 
 
 class PipelineMode(Enum):
@@ -36,12 +55,15 @@ class StageDefinition:
         display_name: Human-readable name (e.g. "Asset Identification").
         get_system_prompt: Callable returning the system prompt for this stage.
         get_task_prompt: Callable returning the task prompt, given prior results.
+            Must satisfy :class:`TaskPromptCallable`. Stages that do not use
+            ``intermediate_reports`` simply declare it as ``**kwargs`` or ignore
+            the kwarg via a default of ``None``.
     """
 
     name: str
     display_name: str
     get_system_prompt: Callable[[SpartanConfig], str]
-    get_task_prompt: Callable[[SpartanConfig, list[StageResult]], str]
+    get_task_prompt: TaskPromptCallable
 
 
 @dataclass
@@ -225,15 +247,11 @@ class PipelineOrchestrator:
 
         system_prompt = stage_def.get_system_prompt(self.config)
 
-        # Some stages accept intermediate_reports as a keyword arg (e.g. final report).
-        import inspect
-        sig = inspect.signature(stage_def.get_task_prompt)
-        if "intermediate_reports" in sig.parameters and intermediate_reports is not None:
-            task_prompt = stage_def.get_task_prompt(
-                self.config, prior_results, intermediate_reports=intermediate_reports
-            )
-        else:
-            task_prompt = stage_def.get_task_prompt(self.config, prior_results)
+        # All task-prompt builders satisfy TaskPromptCallable; those that do not
+        # use intermediate_reports simply receive None and ignore it.
+        task_prompt = stage_def.get_task_prompt(
+            self.config, prior_results, intermediate_reports=intermediate_reports
+        )
 
         # Enforce the recon gate only on Stage 1 variants of pentest/ctf.
         enforce_gate = stage_def.name in ("asset_identification", "recon")

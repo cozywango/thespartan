@@ -219,7 +219,12 @@ Be thorough but efficient. The next stage will use your findings to exploit."""
     return prompt
 
 
-def ctf_stage1_task_prompt(config: SpartanConfig, prior_results: list[StageResult]) -> str:
+def ctf_stage1_task_prompt(
+    config: SpartanConfig,
+    prior_results: list[StageResult],
+    *,
+    intermediate_reports: list[str] | None = None,
+) -> str:
     """Build task prompt for CTF Stage 1."""
     return f"Enumerate and reconnoiter this target: {config.target}"
 
@@ -274,7 +279,12 @@ Method: [brief exploitation summary]"""
     return prompt
 
 
-def ctf_stage2_task_prompt(config: SpartanConfig, prior_results: list[StageResult]) -> str:
+def ctf_stage2_task_prompt(
+    config: SpartanConfig,
+    prior_results: list[StageResult],
+    *,
+    intermediate_reports: list[str] | None = None,
+) -> str:
     """Build task prompt for CTF Stage 2."""
     context = _build_prior_context_block(prior_results)
     task = f"Exploit this target and capture ALL flags: {config.target}"
@@ -310,7 +320,12 @@ GUIDELINES:
     return prompt
 
 
-def ctf_stage3_task_prompt(config: SpartanConfig, prior_results: list[StageResult]) -> str:
+def ctf_stage3_task_prompt(
+    config: SpartanConfig,
+    prior_results: list[StageResult],
+    *,
+    intermediate_reports: list[str] | None = None,
+) -> str:
     """Build task prompt for CTF Stage 3."""
     context = _build_prior_context_block(prior_results)
     task = f"Generate a complete walkthrough for the challenge: {config.target}"
@@ -385,7 +400,12 @@ Be thorough and systematic. The next stage will use this inventory to test for v
     return prompt
 
 
-def pentest_stage1_task_prompt(config: SpartanConfig, prior_results: list[StageResult]) -> str:
+def pentest_stage1_task_prompt(
+    config: SpartanConfig,
+    prior_results: list[StageResult],
+    *,
+    intermediate_reports: list[str] | None = None,
+) -> str:
     """Build task prompt for Pentest Stage 1."""
     return f"Perform comprehensive asset identification on: {config.target}"
 
@@ -443,7 +463,12 @@ Be systematic. Test EVERY service identified in the asset inventory."""
     return prompt
 
 
-def pentest_stage2_task_prompt(config: SpartanConfig, prior_results: list[StageResult]) -> str:
+def pentest_stage2_task_prompt(
+    config: SpartanConfig,
+    prior_results: list[StageResult],
+    *,
+    intermediate_reports: list[str] | None = None,
+) -> str:
     """Build task prompt for Pentest Stage 2."""
     context = _build_prior_context_block(prior_results)
     task = f"Identify all vulnerabilities on {config.target} using BFS strategy."
@@ -510,7 +535,12 @@ GUIDELINES:
     return prompt
 
 
-def pentest_stage3_task_prompt(config: SpartanConfig, prior_results: list[StageResult]) -> str:
+def pentest_stage3_task_prompt(
+    config: SpartanConfig,
+    prior_results: list[StageResult],
+    *,
+    intermediate_reports: list[str] | None = None,
+) -> str:
     """Build task prompt for Pentest Stage 3."""
     context = _build_prior_context_block(prior_results)
     task = f"Generate a formal penetration test report for: {config.target}"
@@ -567,7 +597,13 @@ End with a structured asset inventory:
 
     return prompt
 
-def passive_stage1_task_prompt(config: SpartanConfig, prior_results: list[StageResult]) -> str:
+def passive_stage1_task_prompt(
+    config: SpartanConfig,
+    prior_results: list[StageResult],
+    *,
+    intermediate_reports: list[str] | None = None,
+) -> str:
+    """Build task prompt for Passive Stage 1."""
     return f"Perform passive asset discovery on: {config.target}"
 
 
@@ -613,7 +649,13 @@ End with a summary table:
 
     return prompt
 
-def passive_stage2_task_prompt(config: SpartanConfig, prior_results: list[StageResult]) -> str:
+def passive_stage2_task_prompt(
+    config: SpartanConfig,
+    prior_results: list[StageResult],
+    *,
+    intermediate_reports: list[str] | None = None,
+) -> str:
+    """Build task prompt for Passive Stage 2."""
     context = _build_prior_context_block(prior_results)
     task = f"Perform passive vulnerability inference for: {config.target}"
     if context:
@@ -665,7 +707,13 @@ GUIDELINES:
 
     return prompt
 
-def passive_stage3_task_prompt(config: SpartanConfig, prior_results: list[StageResult]) -> str:
+def passive_stage3_task_prompt(
+    config: SpartanConfig,
+    prior_results: list[StageResult],
+    *,
+    intermediate_reports: list[str] | None = None,
+) -> str:
+    """Build task prompt for Passive Stage 3."""
     context = _build_prior_context_block(prior_results)
     task = f"Generate a passive vulnerability assessment report for: {config.target}"
     if context:
